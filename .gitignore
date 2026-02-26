@@ -1,0 +1,11 @@
+# vscode settings directory
+.vscode
+# OS X specific files.
+.DS_store
+
+# CMakeLists generated
+build/
+/.cache
+
+# Compiled Object files
+*.o
