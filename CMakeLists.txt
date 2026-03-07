@@ -1,17 +1,36 @@
-cmake_minimum_required(VERSION 3.10)
-set(CMAKE_CXX_STANDARD 17) # Compile as C++17.
-set(CMAKE_CXX_STANDARD_REQUIRED ON) # Require C++17 support.
-set(CLANG_VERSION 15)
+cmake_minimum_required(VERSION 3.16)
 
 project(HttpProxy
         DESCRIPTION "HTTP Proxy from https://csprimer.com/courses/networking/#http"
-        LANGUAGES C CXX
+        LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# -----------------------
+# Main library
+# -----------------------
+add_library(HttpProxy
+    src/parser.cpp
 )
 
-# Default to Debug mode
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-        message(STATUS "Setting build type to `Debug` as none was specified.")
-        set(CMAKE_BUILD_TYPE "Debug")
-endif()
+target_include_directories(HttpProxy PUBLIC src)
 
 add_executable(proxy src/proxy.cpp)
+target_link_libraries(proxy PRIVATE HttpProxy)
+
+# -----------------------
+# Testing
+# -----------------------
+enable_testing()
+
+include(FetchContent)
+FetchContent_Declare(
+    googletest
+    URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.zip
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_MakeAvailable(googletest)
+
+add_subdirectory(test)
