@@ -1,26 +1,27 @@
 #ifndef H_src_parser
 #define H_src_parser
 
+#include <array>
 #include <cstddef>
 #include <string>
 #include <string_view>
 
 enum class ParseState : std::uint8_t { kStartLine, kHeaders, kBody, kEnd };
 
-class HttpRes {
+class Http {
 public:
   void Parser(std::string_view message);
-  const std::string& StatusCode() const noexcept;
-  const std::string& StatusMessage() const noexcept;
+  void ClearMessage() noexcept;
+  std::array<std::string, 3> StatusLine() const noexcept;
   const std::string& Response() const noexcept;;
-  void Clear() noexcept;
+  ParseState GetState() const noexcept;
+  bool KeepAlive() noexcept;
   
   private:
-  std::string res_message;
+  std::string send_message;
   size_t content_length = 0;
+  std::string connection;
   ParseState parsing_state = ParseState::kStartLine;
-  // status line
-  std::string status_code;
-  std::string status_message;
+  std::array<std::string, 3>parsed_status_line{};
 };
 #endif

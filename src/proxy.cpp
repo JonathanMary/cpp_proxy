@@ -17,6 +17,14 @@
 #include <string_view>
 
 namespace {
+const char *kProxyPort = "8000";
+const char *kProxyHost = "0.0.0.0";
+const char *kServerPort = "9000";
+const char *kServerHost = "127.0.0.1";
+
+const int kBufferSize = 4096;
+std::array<char, kBufferSize> buffer;
+
 void PrintAddressInfo(const sockaddr_storage &addr) {
   char client_ip[INET_ADDRSTRLEN];
 
@@ -65,22 +73,102 @@ private:
   int socket_fd_{-1};
 };
 
-int main() {
-  const char *kProxyPort = "8000";
-  const char *kProxyHost = "0.0.0.0";
-  const char *kServerPort = "9000";
-  const char *kServerHost = "127.0.0.1";
-  const int kBufferSize = 4096;
-
-  std::array<char, kBufferSize> buffer;
-  sockaddr_storage client_addr{};
+static void HandleClientConnection(Socket client_socket) {
   addrinfo hints{};
-  std::unique_ptr<addrinfo, decltype(&freeaddrinfo)> endpoints(nullptr,
-                                                               freeaddrinfo);
-
   hints.ai_family = AF_INET;
   hints.ai_socktype = SOCK_STREAM;
   hints.ai_flags = AI_PASSIVE;
+
+  for (;;) {
+    // 2. connect upstream
+    std::unique_ptr<addrinfo, decltype(&freeaddrinfo)> server_addr(
+        nullptr, freeaddrinfo);
+    addrinfo *raw;
+
+    int gai_res_server = getaddrinfo(kServerHost, kServerPort, &hints, &raw);
+    if (gai_res_server != 0) {
+      std::cerr << "error gai_res_server 2: " << gai_strerror(gai_res_server)
+                << std::endl;
+      continue;
+    }
+    server_addr.reset(raw);
+
+    Socket server_socket(socket(server_addr->ai_family,
+                                server_addr->ai_socktype,
+                                server_addr->ai_protocol));
+    if (server_socket.fd() < 0) {
+      continue;
+    }
+
+    if (connect(server_socket.fd(), server_addr->ai_addr,
+                server_addr->ai_addrlen) != 0) {
+      std::cerr << "Connect server_socket failed." << std::endl;
+      continue;
+    }
+    std::cout << "Connected to server_socket." << std::endl;
+
+    Http req;
+    // 3. recv from client
+    while (req.GetState() != ParseState::kEnd) {
+      ssize_t client_msg_len =
+          recv(client_socket.fd(), buffer.data(), buffer.size(), 0);
+      if (client_msg_len < 0) {
+        std::cerr << "recv client failed." << std::endl;
+        continue;
+      }
+      std::cout << "->*   " << client_msg_len << std::endl;
+
+      if (client_msg_len == 0) {
+        return;
+      }
+      req.Parser(std::string_view(buffer.data(), client_msg_len));
+
+      // 4. send to server_socket
+      if (send(server_socket.fd(), req.Response().data(), req.Response().size(),
+               0) < 0) {
+        std::cerr << "Send server_socket failed." << std::endl;
+        continue;
+      }
+      std::cout << "  *-> " << req.Response().size() << std::endl;
+      req.ClearMessage();
+    }
+
+    ssize_t server_msg_len;
+    Http res;
+    // 5. recv from server until full response is parsed
+    for (;;) {
+      server_msg_len =
+          recv(server_socket.fd(), buffer.data(), buffer.size(), 0);
+      std::cout << "  *<- " << server_msg_len << std::endl;
+      if (server_msg_len <= 0) {
+        break;
+      }
+      res.Parser(std::string_view(buffer.data(), server_msg_len));
+
+      // 6. forward parsed chunk to client
+      if (send(client_socket.fd(), res.Response().data(), res.Response().size(),
+               0) < 0) {
+        std::cerr << "Send client failed." << std::endl;
+        break;
+      }
+      std::cout << "<-*   " << res.Response().size() << std::endl;
+      res.ClearMessage();
+    }
+    if (!req.KeepAlive()) {
+      return;
+    }
+  }
+}
+
+int main() {
+  addrinfo hints{};
+  hints.ai_family = AF_INET;
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_flags = AI_PASSIVE;
+
+  sockaddr_storage client_addr{};
+  std::unique_ptr<addrinfo, decltype(&freeaddrinfo)> endpoints(nullptr,
+                                                               freeaddrinfo);
 
   addrinfo *raw = nullptr;
   int gai_res_endpoints = getaddrinfo(kProxyHost, kProxyPort, &hints, &raw);
@@ -130,77 +218,7 @@ int main() {
 
     PrintAddressInfo(client_addr);
 
-    // 2. connect upstream
-    std::unique_ptr<addrinfo, decltype(&freeaddrinfo)> server_addr(
-        nullptr, freeaddrinfo);
-    addrinfo *raw;
-
-    int gai_res_server = getaddrinfo(kServerHost, kServerPort, &hints, &raw);
-    if (gai_res_server != 0) {
-      std::cerr << "error gai_res_server 2: " << gai_strerror(gai_res_server)
-                << std::endl;
-      continue;
-    }
-    server_addr.reset(raw);
-
-    Socket server_socket(socket(server_addr->ai_family,
-                                server_addr->ai_socktype,
-                                server_addr->ai_protocol));
-    if (server_socket.fd() < 0) {
-      continue;
-    }
-
-    if (connect(server_socket.fd(), server_addr->ai_addr,
-                server_addr->ai_addrlen) != 0) {
-      std::cerr << "Connect server_socket failed." << std::endl;
-      continue;
-    }
-    std::cout << "Connected to server_socket." << std::endl;
-
-    // 3. recv from client
-    ssize_t client_msg_len =
-        recv(client_socket.fd(), buffer.data(), buffer.size() - 1, 0);
-    if (client_msg_len < 0) {
-      std::cerr << "recv client failed." << std::endl;
-      continue;
-    }
-    std::cout << "->*   " << client_msg_len << std::endl;
-
-    // 4. send to server_socket
-    if (send(server_socket.fd(), buffer.data(), client_msg_len, 0) < 0) {
-      std::cerr << "Send server_socket failed." << std::endl;
-      continue;
-    }
-    std::cout << "  *-> " << client_msg_len << std::endl;
-
-    ssize_t server_msg_len;
-    HttpRes res;
-    while ((server_msg_len = recv(server_socket.fd(), buffer.data(),
-                                  buffer.size() - 1, 0)) > 0) {
-      if (server_msg_len < 0) {
-        std::cerr << "recv server_socket failed." << std::endl;
-        continue;
-      }
-      // 5. recv until server_socket closes
-      std::cout << "  *<- " << server_msg_len << std::endl;
-      res.Parser(std::string_view(buffer.data(), server_msg_len));
-      if (res.StatusCode() == "200") {
-        auto persistent_res = res.Response();
-
-        // 6. forward to client
-        if (send(client_socket.fd(), persistent_res.data(), persistent_res.size(), 0) < 0) {
-          std::cerr << "Send client failed." << std::endl;
-          continue;
-        }
-      } else {
-        if (send(client_socket.fd(), buffer.data(), server_msg_len, 0) < 0) {
-          std::cerr << "Send client failed." << std::endl;
-          continue;
-        }
-      }
-      std::cout << "<-*   " << server_msg_len << std::endl;
-      res.Clear();
-    }
+    HandleClientConnection(std::move(client_socket));
   }
   return 0;
 }
