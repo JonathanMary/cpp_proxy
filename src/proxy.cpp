@@ -77,7 +77,7 @@ static void HandleClientConnection(Socket client_socket) {
   addrinfo hints{};
   hints.ai_family = AF_INET;
   hints.ai_socktype = SOCK_STREAM;
-  hints.ai_flags = AI_PASSIVE;
+  hints.ai_flags = 0;
 
   for (;;) {
     // 2. connect upstream
@@ -114,7 +114,7 @@ static void HandleClientConnection(Socket client_socket) {
           recv(client_socket.fd(), buffer.data(), buffer.size(), 0);
       if (client_msg_len < 0) {
         std::cerr << "recv client failed." << std::endl;
-        continue;
+        break;
       }
       std::cout << "->*   " << client_msg_len << std::endl;
 
