@@ -20,6 +20,8 @@ target_include_directories(HttpProxy PUBLIC src)
 add_executable(proxy src/proxy.cpp)
 target_link_libraries(proxy PRIVATE HttpProxy)
 
+add_executable(server src/server.cpp)
+
 # -----------------------
 # Testing
 # -----------------------
